@@ -46,22 +46,30 @@ public class SentimentAnalysis
             KafkaUtils.createStream(
                 ssc,
                 Properties.getString("rts.spark.zkhosts"),
-                "twitter.sentimentanalysis.kafka",
-                topicMap);
+                "twitter.sentimentanalysis.kafka",  // groupId
+                topicMap                            // topics Map
+            );
 
         JavaDStream<String> json = messages.map(
             new Function<Tuple2<String, String>, String>() {
                 private static final long serialVersionUID = 42l;
                 @Override
                 public String call(Tuple2<String, String> message) {
+                    // Stripping Kafka Message IDs
+                    // It turns out the messages from Kafka are retuned as tuples,
+                    // more specifically pairs, with the message ID and the message content.
+                    // Before continuing, the message ID is stripped and the Twitter
+                    // JSON data is passed down the pipeline.
                     return message._2();
                 }
             }
         );
 
+        // Only need tweet ID, tweet text; and lang=EN
         JavaPairDStream<Long, String> tweets = json.mapToPair(
             new TwitterFilterFunction());
 
+        // get rid of NULL tweet
         JavaPairDStream<Long, String> filtered = tweets.filter(
             new Function<Tuple2<Long, String>, Boolean>() {
                 private static final long serialVersionUID = 42l;
@@ -72,21 +80,27 @@ public class SentimentAnalysis
             }
         );
 
+        // get rid of messy or otherwise unnecessary characters and punctuation in tweet
         JavaDStream<Tuple2<Long, String>> tweetsFiltered = filtered.map(
             new TextFilterFunction());
 
+        // get rid of stop words
         tweetsFiltered = tweetsFiltered.map(
             new StemmingFunction());
 
+        // score positive
         JavaPairDStream<Tuple2<Long, String>, Float> positiveTweets =
             tweetsFiltered.mapToPair(new PositiveScoreFunction());
 
+        // score negative
         JavaPairDStream<Tuple2<Long, String>, Float> negativeTweets =
             tweetsFiltered.mapToPair(new NegativeScoreFunction());
 
+        // join
         JavaPairDStream<Tuple2<Long, String>, Tuple2<Float, Float>> joined =
             positiveTweets.join(negativeTweets);
 
+        // flat out
         JavaDStream<Tuple4<Long, String, Float, Float>> scoredTweets =
             joined.map(new Function<Tuple2<Tuple2<Long, String>,
                                            Tuple2<Float, Float>>,
@@ -104,10 +118,14 @@ public class SentimentAnalysis
             }
         });
 
+        // mark
         JavaDStream<Tuple5<Long, String, Float, Float, String>> result =
             scoredTweets.map(new ScoreTweetsFunction());
 
+        // save RDD to HDFS
         result.foreachRDD(new FileWriter());
+
+        // post to web server
         result.foreachRDD(new HTTPNotifierFunction());
 
         ssc.start();

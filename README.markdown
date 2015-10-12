@@ -11,3 +11,6 @@ please refer to the LICENSE text file included with this project, or visit
 [gnu.org][1] if the license file was not included.
 
 [1]: http://www.gnu.org/licenses/gpl.html
+
+## Reference ##
+http://zdatainc.com/2014/08/real-time-streaming-apache-spark-streaming/
